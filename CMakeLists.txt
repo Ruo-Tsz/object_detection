@@ -241,6 +241,13 @@ add_executable(
    src/model_sift.cpp
 )
 
+add_executable(
+   kd_search
+   src/kd_search.cpp
+)
+
+
+
 
 
 target_link_libraries(
@@ -272,6 +279,12 @@ target_link_libraries(
    model_sift
    ${catkin_LIBRARIES}
 )
+
+target_link_libraries(
+   kd_search
+   ${catkin_LIBRARIES}
+)
+
 
 
 
