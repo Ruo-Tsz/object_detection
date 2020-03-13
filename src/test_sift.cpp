@@ -88,7 +88,9 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr filter_ground(pcl::PointCloud<pcl::PointXYZ>
     pcl::ExtractIndices<pcl::PointXYZ> extract;
 
     int i = 0;
-    for(i=0;i<iteration;i++){
+    int total_pt = (int)(cloud_in->size());
+    // for(i=0;i<iteration;i++){
+    for(i=0; cloud_in->size() > 0.7*total_pt; i++){
         // Segment the largest planar component from the remaining cloud
         seg.setInputCloud (cloud_in);
         seg.segment (*inliers, *coefficients);
@@ -105,7 +107,8 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr filter_ground(pcl::PointCloud<pcl::PointXYZ>
         extract.setNegative (true);
         extract.filter (*cloud_f);
         cloud_in.swap (cloud_f);
-        //cout<<i<<endl;
+        cout<<i<<endl;
+        cout<<cloud_in->size()<<endl;
   }
     return cloud_in;
 }
@@ -358,18 +361,17 @@ int main(int argc, char** argv)
     // int k_search_no = std::strtol(k_search.c_str(),nullptr,10);
     int k_search_no = 20;
 
-   
 
   //////////////////////////////single frame
     // std::string ply_file = "/home/d300/catkin_carol/lidar_frame/PC_315966449519192000.ply";
-    std::string scene_file = "/home/d300/catkin_carol/src/object_detection/extracted_radius_10.pcd";
+    std::string scene_file = "/home/d300/catkin_carol/src/object_detection/extracted_radius_2.pcd";
     // std::string pcd_path = "/home/d300/catkin_carol/src/object_detection/model/3D_Models/audi_a3/scan/";
     std::string pcd_path = "/home/d300/catkin_carol/src/object_detection/model/3D_Models/Audi_R8/scan/";
-    std::string model_file = pcd_path + argv[1];
-    cout << argc << endl;
-    for(int i=0; i<argc; i++){
-      cout<<argv[i]<<endl;
-    }
+    // std::string model_file = pcd_path + argv[1];
+    std::string model_file, model;
+    nh.getParam("model",model);
+    model_file = pcd_path + model;
+    
     // std::cout << "Reading " << ply_file << std::endl;
     std::cout << "Reading " << scene_file << std::endl;
     std::cout << "Reading " << model_file << std::endl;
@@ -569,10 +571,19 @@ int main(int argc, char** argv)
     
 
     //可视化
-	boost::shared_ptr<pcl::visualization::PCLVisualizer> view(new pcl::visualization::PCLVisualizer("pfh test"));
+  string win_name;
+  if( !(method.compare("pfh")) )
+    win_name = "pfh descriptor";
+  else if ( !(method.compare("fpfh")) )
+    win_name = "fpfh descriptor";
+  else
+    win_name = "Sift keypoint";
+  
+	boost::shared_ptr<pcl::visualization::PCLVisualizer> view(new pcl::visualization::PCLVisualizer(win_name));
 	int v1 = 0;
 	int v2 = 1;
 	view->createViewPort(0, 0, 0.5, 1, v1);
+  // view->createViewPort(0, 0, 1, 1, v1);
 	view->createViewPort(0.5, 0, 1, 1, v2);
 	view->setBackgroundColor(0, 0, 0, v1);
 	view->setBackgroundColor(0.05, 0, 0, v2);
@@ -585,10 +596,10 @@ int main(int argc, char** argv)
 	view->addPointCloud(target_temp, target_temp_color, "target_temp_v1", v1);
   pcl::visualization::PointCloudColorHandlerCustom<pcl::PointXYZ> source_temp_color(source_temp, 255, 255, 0);
   view->addPointCloud(source_temp, source_temp_color, "source_temp_v1", v1);
-	view->setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 1, "sources_cloud_v1", v1);
+	view->setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 2, "sources_cloud_v1", v1);
   view->setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 1, "target_cloud_v1", v1);
-  view->setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 5, "target_temp_v1", v1);
-  view->setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 3, "source_temp_v1", v1);
+  view->setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 6, "target_temp_v1", v1);
+  view->setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 6, "source_temp_v1", v1);
 
 	// final 為 source 的 keypoint 不是原完整點雲
 	// pcl::visualization::PointCloudColorHandlerCustom<pcl::PointXYZ> aligend_cloud_color(final, 255, 0, 0);
@@ -598,7 +609,7 @@ int main(int argc, char** argv)
 
 
 	view->addPointCloud(cloud_target, target_cloud_color, "target_cloud_v2", v2);
-	view->setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 1, "aligend_cloud_v2");
+	view->setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 2, "aligend_cloud_v2");
 	view->setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 1, "target_cloud_v2");
 
 	//对应关系可视化

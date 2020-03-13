@@ -246,6 +246,11 @@ add_executable(
    src/kd_search.cpp
 )
 
+add_executable(
+   icp
+   src/icp.cpp
+)
+
 
 
 
@@ -282,6 +287,12 @@ target_link_libraries(
 
 target_link_libraries(
    kd_search
+   ${catkin_LIBRARIES}
+)
+
+
+target_link_libraries(
+   icp
    ${catkin_LIBRARIES}
 )
 
