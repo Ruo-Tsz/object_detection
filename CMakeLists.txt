@@ -251,6 +251,11 @@ add_executable(
    src/icp.cpp
 )
 
+add_executable(
+   pass
+   src/passthrough.cpp
+)
+
 
 
 
@@ -293,6 +298,11 @@ target_link_libraries(
 
 target_link_libraries(
    icp
+   ${catkin_LIBRARIES}
+)
+
+target_link_libraries(
+   pass
    ${catkin_LIBRARIES}
 )
 

@@ -40,7 +40,7 @@ int main(int argc, char** argv){
     // std::string ply_file = "/home/d300/catkin_carol/lidar_frame/PC_315966449519192000.ply";
     std::cout << "Reading " << pcd_path << std::endl;
     pcl::PointCloud<pcl::PointXYZI>::Ptr cloud_xyz (new pcl::PointCloud<pcl::PointXYZI>);
-    if(pcl::io::loadPCDFile<pcl::PointXYZI> (pcd_path, *cloud_xyz) == -1) // load the file
+    if(pcl::io::loadPLYFile<pcl::PointXYZI> (pcd_path, *cloud_xyz) == -1) // load the file
     {
       PCL_ERROR ("Couldn't read file");
       return -1;

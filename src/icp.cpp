@@ -38,11 +38,15 @@ int main(int argc, char** argv){
     // string p3 = "/home/d300/catkin_carol/src/object_detection/model/3D_Models/Audi_R8/scan/scaled_right_front_3.5m00000.pcd";
     // string p4 = "/home/d300/catkin_carol/src/object_detection/model/3D_Models/Audi_R8/scan/scaled_right_back_3.5m00000.pcd";
 
-    string p1 = "/home/d300/catkin_carol/src/object_detection/model/3D_Models/Audi_R8/scan/left_front_3.5m_word_frame00000.pcd";
-    string p2 = "/home/d300/catkin_carol/src/object_detection/model/3D_Models/Audi_R8/scan/left_back_3.5m_word_frame00000.pcd";
+    // string p1 = "/home/d300/catkin_carol/src/object_detection/model/3D_Models/Audi_R8/scan/left_front_3.5m_word_frame00000.pcd";
+    // string p2 = "/home/d300/catkin_carol/src/object_detection/model/3D_Models/Audi_R8/scan/left_back_3.5m_word_frame00000.pcd";
     string p3 = "/home/d300/catkin_carol/src/object_detection/model/3D_Models/Audi_R8/scan/right_front_3.5m_word_frame00000.pcd";
     string p4 = "/home/d300/catkin_carol/src/object_detection/model/3D_Models/Audi_R8/scan/right_back_3.5m_word_frame00000.pcd";
 
+    string p1 = "/home/d300/catkin_carol/src/object_detection/model/3D_Models/Audi_R8/scan/right_3.5m_word_frame00000.pcd";
+    string p2 = "/home/d300/catkin_carol/src/object_detection/model/3D_Models/Audi_R8/scan/right_front_3.5m_word_frame00000.pcd";
+    
+    
 
     clouds.resize(4);
     for(int i=0; i<clouds.size(); i++){
@@ -145,11 +149,12 @@ int main(int argc, char** argv){
 
     sensor_msgs::PointCloud2 out_whole;
     pcl::PointCloud<pcl::PointXYZI>::Ptr whole (new pcl::PointCloud<pcl::PointXYZI>);
-    for(int i=0; i<clouds.size(); i++){
+    // for(int i=0; i<clouds.size(); i++){
+    for(int i=0; i<2; i++){
         *whole += *(clouds.at(i)); 
     }
 
-    pcl::io::savePCDFile("whole_r8.pcd", *whole, false);
+    pcl::io::savePCDFile("right_front_3.5m_r8.pcd", *whole, false);
     pcl::toROSMsg(*(whole), out_whole);
     out_whole.header.frame_id = "scan";
     
