@@ -33,6 +33,7 @@
 
 #include <pcl/registration/ia_ransac.h>
 #include <pcl/registration/icp.h>
+#include <pcl/registration/ndt.h>
 #include <pcl/registration/correspondence_estimation.h>
 #include <pcl/registration/correspondence_rejection_features.h>
 #include <pcl/registration/correspondence_rejection_sample_consensus.h>
@@ -75,6 +76,11 @@ ofstream outputFile;
 string filename_dir = "/home/d300/catkin_carol/src/object_detection/output";
 string method;
 
+//icp
+int max_iteration = 50;
+double max_corresDist = 0.8f; //0.04 seems to in local optimal, converge to initial sac result (4 cm tight threshold)  >0.4 good太小無法配準
+double EucFitnessEps = 0.05f; //score ->所有點距離均方差 0.2->0.05好一些 ->0.01跟0.05差不多
+double TransEps = 1e-10f;
 
 template<class T>
 string ConvertToString(T value){
@@ -82,6 +88,42 @@ string ConvertToString(T value){
   ss << value;
   return ss.str();
 }
+
+
+// template<class T>
+// template<typename T>
+template<typename T1, typename T2>
+Eigen::Matrix4f CalSACia(T1 source_des, T1 target_des, pcl::PointCloud<pcl::PointXYZ>::Ptr source_temp, pcl::PointCloud<pcl::PointXYZ>::Ptr target_temp, T2 points){
+  pcl::SampleConsensusInitialAlignment<pcl::PointXYZ, pcl::PointXYZ, T2> sac_ia;
+  pcl::PointCloud <pcl::PointXYZ>::Ptr final(new pcl::PointCloud<pcl::PointXYZ> );
+  Eigen::Matrix4f sac_trans = Eigen::Matrix4f::Identity();
+  sac_ia.setInputSource(source_temp);
+  sac_ia.setSourceFeatures(source_des);
+  sac_ia.setInputTarget(target_temp);
+  sac_ia.setTargetFeatures(target_des);
+
+  pcl::console::TicToc timer_align;
+  timer_align.tic();
+
+  sac_ia.setNumberOfSamples(3);
+  sac_ia.setCorrespondenceRandomness(6);//设置计算协方差时选择多少近邻点，该值越大，协防差越精确，但是计算效率越低.(可省)
+  //sac_ia.setMaximumIterations(100);
+  sac_ia.setEuclideanFitnessEpsilon(0.001);
+  sac_ia.setTransformationEpsilon(1e-10);
+  sac_ia.setRANSACIterations(30); 
+  sac_ia.align(*final); //source cloud(keypoint source) aligned to target
+  cout <<"has converged: "<< sac_ia.hasConverged() <<",score: "<<sac_ia.getFitnessScore()<< endl;
+  cout<<"Tranformation is\n "<<sac_ia.getFinalTransformation()<<endl;
+  string sac_time = ConvertToString(timer_align.toc()/1000);
+  string sac_score = ConvertToString(sac_ia.getFitnessScore());
+  cout <<"Need "<<timer_align.toc()/1000<<" secs.\n";
+  cout<< "The final size: "<<final->points.size()<<endl;
+  
+  sac_trans = sac_ia.getFinalTransformation();
+
+  return sac_trans;
+} 
+
 
 
 pcl::PointCloud<pcl::PointXYZ>::Ptr filter_ground(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_in){
@@ -128,8 +170,6 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr filter_ground(pcl::PointCloud<pcl::PointXYZ>
 
 
 
-
-
 pcl::PointCloud<pcl::PointXYZ>::Ptr crop(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_clusters){
   Eigen::Vector4f box_min,box_max;
   pcl::PointCloud<pcl::PointXYZ>::Ptr cluster_box(new pcl::PointCloud<pcl::PointXYZ> );
@@ -168,10 +208,11 @@ pcl::PointCloud<pcl::FPFHSignature33>::Ptr Compute_FPFH(pcl::PointCloud<pcl::Poi
     for (int i = 0; i < normals->points.size(); i++){
       if (!pcl::isFinite<pcl::Normal>(normals->points[i])){
         PCL_WARN("normals[%d] is not finite\n", i);
+        cout << normals->points[i] <<endl;
         count++;
       }
     }
-    PCL_WARN("We have [%d] infinite normal.",count);
+    PCL_WARN("We have %d infinite normal.\n",count);
 
 
     pcl::console::TicToc fpfh_time;
@@ -374,6 +415,33 @@ pcl::PointCloud<pcl::PointWithScale> do_sift(pcl::PointCloud<pcl::PointXYZ>::Ptr
     return result;
 }
 
+Eigen::Matrix4f do_icp (pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_source, pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_target, Eigen::Matrix4f sac_trans){
+  pcl::IterativeClosestPoint<pcl::PointXYZ, pcl::PointXYZ> icp;
+  pcl::PointCloud <pcl::PointXYZ>::Ptr icp_result (new pcl::PointCloud <pcl::PointXYZ> );
+  pcl::console::TicToc timer_icp;
+  timer_icp.tic();
+  icp.setInputSource(cloud_source);
+  icp.setInputTarget(cloud_target);
+  icp.setMaximumIterations(max_iteration);
+  icp.setMaxCorrespondenceDistance(max_corresDist);
+  icp.setEuclideanFitnessEpsilon(EucFitnessEps);
+  icp.setTransformationEpsilon(TransEps);
+  icp.align(*icp_result, sac_trans);
+  cout <<"----------------------\nFor "<<method<<"\nICP:";
+  cout <<"has converged: "<< icp.hasConverged() <<",score: "<<icp.getFitnessScore()<< endl;
+  cout << icp.getConvergeCriteria()<<endl;
+  
+  cout<<"ICP Tranformation is\n "<<icp.getFinalTransformation()<<endl;
+  double icp_times_up = timer_icp.toc()/1000.0;
+  string icp_time = ConvertToString(icp_times_up);
+  string icp_score = ConvertToString(icp.getFitnessScore());
+  cout <<"Need "<<icp_times_up<<" secs.\n";
+  cout<< "The final size: "<<icp_result->points.size()<<endl;
+
+  Eigen::Matrix4f icp_trans = icp.getFinalTransformation();
+  return icp_trans;
+}
+
 void callback(const sensor_msgs::PointCloud2 &msg){
     cout << "Get new at " << msg.header.stamp << std::endl;
     std::cout << "Original points: " << msg.width*msg.height <<std::endl;
@@ -474,11 +542,6 @@ int main(int argc, char** argv)
     std::cout << "Reading " << model_file << std::endl;
     pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_source (new pcl::PointCloud<pcl::PointXYZ>);
     pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_target (new pcl::PointCloud<pcl::PointXYZ>);
-    // if(pcl::io::loadPLYFile<pcl::PointXYZ> (ply_file, *cloud_source) == -1) // load the file
-    // {
-    //   PCL_ERROR ("Couldn't read file ",ply_file);
-    //   return -1;
-    // }
     if(pcl::io::loadPCDFile<pcl::PointXYZ> (model_file, *cloud_target) == -1) // load the file
     {
       PCL_ERROR ("Couldn't read file ",model_file);
@@ -490,16 +553,8 @@ int main(int argc, char** argv)
       return -1;
     }
 
-    // float theta = 50.0* (M_PI/180.0);
-    // Eigen::Matrix4f rotate;
-    // rotate << cos(theta),-1*sin(theta),0.0, 2.0,
-    //           sin(theta),   cos(theta),0.0, 2.0,
-    //           0.0,          0.0,       1.0, 2.0,
-    //           0.0,          0.0,       0.0, 1.0;  
-    
-    // pcl::transformPointCloud(*cloud_source, *cloud_source, rotate);
-
-    std::cout << "Point # : " << cloud_source->points.size () <<std::endl;
+    std::cout << "Point # of source : " << cloud_source->points.size () <<std::endl;
+    std::cout << "Point # of model : " << cloud_target->points.size () <<std::endl;
     // cloud_source = filter_ground(cloud_source);
     std::cout<<"After remove ground: " << cloud_source->points.size() << std::endl;
     
@@ -533,30 +588,25 @@ int main(int argc, char** argv)
     copyPointCloud(result_source, *source_temp);
     copyPointCloud(result_target, *target_temp);
 
-    pcl::PointCloud<pcl::PFHSignature125>::Ptr pfh_source (new pcl::PointCloud<pcl::PFHSignature125>);
-    pcl::PointCloud<pcl::PFHSignature125>::Ptr pfh_target (new pcl::PointCloud<pcl::PFHSignature125>);
-    pcl::PointCloud<pcl::FPFHSignature33>::Ptr fpfh_source (new pcl::PointCloud<pcl::FPFHSignature33>);
-    pcl::PointCloud<pcl::FPFHSignature33>::Ptr fpfh_target (new pcl::PointCloud<pcl::FPFHSignature33>);
-    pcl::PointCloud<pcl::SHOT352>::Ptr shot_source (new pcl::PointCloud<pcl::SHOT352>);
-    pcl::PointCloud<pcl::SHOT352>::Ptr shot_target (new pcl::PointCloud<pcl::SHOT352>);
-
-    pcl::SampleConsensusInitialAlignment<pcl::PointXYZ, pcl::PointXYZ, pcl::PFHSignature125> sac_ia_pfh;
-    pcl::SampleConsensusInitialAlignment<pcl::PointXYZ, pcl::PointXYZ, pcl::FPFHSignature33> sac_ia_fpfh;
-    pcl::SampleConsensusInitialAlignment<pcl::PointXYZ, pcl::PointXYZ, pcl::SHOT352> sac_ia_shot;
-
-    pcl::PointCloud <pcl::PointXYZ>::Ptr final(new pcl::PointCloud<pcl::PointXYZ> );
-    pcl::PointCloud <pcl::PointXYZ>::Ptr icp_result (new pcl::PointCloud <pcl::PointXYZ> );
+    
+    pcl::PointCloud <pcl::PointXYZ>::Ptr ndt_result (new pcl::PointCloud <pcl::PointXYZ> );
     Eigen::Matrix4f sac_trans = Eigen::Matrix4f::Identity();
     Eigen::Matrix4f icp_trans = Eigen::Matrix4f::Identity();
-    string icp_time, sac_time, sac_score, icp_score;
+    Eigen::Matrix4f ndt_trans = Eigen::Matrix4f::Identity();
 
-    pcl::IterativeClosestPoint<pcl::PointXYZ, pcl::PointXYZ> icp;
+    //傳回time要畫在viewer上
+    string icp_time, sac_time, sac_score, icp_score, ndt_time, ndt_score;
+
+    pcl::NormalDistributionsTransform<pcl::PointXYZ, pcl::PointXYZ> ndt;
 
     if ( !(method.compare("pfh")) ){
+      pcl::PointCloud<pcl::PFHSignature125>::Ptr pfh_source (new pcl::PointCloud<pcl::PFHSignature125>);
+      pcl::PointCloud<pcl::PFHSignature125>::Ptr pfh_target (new pcl::PointCloud<pcl::PFHSignature125>);
       pfh_source = Compute_PFH(cloud_source,source_temp, k_search_no, false);
       pfh_target = Compute_PFH(cloud_target,target_temp, k_search_no, false);
 
-
+      sac_trans = CalSACia(pfh_source, pfh_target, source_temp, target_temp, pfh_target->points[0]);
+      /*
       sac_ia_pfh.setInputSource(source_temp);
       sac_ia_pfh.setSourceFeatures(pfh_source);
       sac_ia_pfh.setInputTarget(target_temp);
@@ -580,7 +630,7 @@ int main(int argc, char** argv)
       cout<< "The final size: "<<final->points.size()<<endl;
       
       sac_trans = sac_ia_pfh.getFinalTransformation();
-
+      */
 
       // icp
       pcl::console::TicToc timer_icp;
@@ -590,53 +640,85 @@ int main(int argc, char** argv)
       icp.setInputTarget(cloud_target);
       icp.setMaximumIterations(50);
       icp.setMaxCorrespondenceDistance(0.4);//0.04 seems to in local optimal, converge to initial sac result (4 cm tight threshold) 
-      icp.setEuclideanFitnessEpsilon(0.2);
+      icp.setEuclideanFitnessEpsilon(0.05);
       icp.setTransformationEpsilon(1e-10);
       icp.align(*icp_result, sac_trans);
       cout <<"----------------------\nFor "<<method<<"\nICP:";
       cout <<"has converged: "<< icp.hasConverged() <<",score: "<<icp.getFitnessScore()<< endl;
       cout<<"ICP Tranformation is\n "<<icp.getFinalTransformation()<<endl;
-      icp_time = ConvertToString(timer_icp.toc()/1000);
+      double icp_times_up = timer_icp.toc()/1000.0;
+      icp_time = ConvertToString(icp_times_up);
       icp_score = ConvertToString(icp.getFitnessScore());
-      cout <<"Need "<<timer_icp.toc()/1000<<" secs.\n";
+      cout <<"Need "<<icp_times_up<<" secs.\n";
       cout<< "The final size: "<<icp_result->points.size()<<endl;
 
       icp_trans = icp.getFinalTransformation();
 
     }
     else if( !(method.compare("fpfh")) ){
+      pcl::PointCloud<pcl::FPFHSignature33>::Ptr fpfh_source (new pcl::PointCloud<pcl::FPFHSignature33>);
+      pcl::PointCloud<pcl::FPFHSignature33>::Ptr fpfh_target (new pcl::PointCloud<pcl::FPFHSignature33>);
       fpfh_source = Compute_FPFH(cloud_source,source_temp, k_search_no, true);
       fpfh_target = Compute_FPFH(cloud_target,target_temp, k_search_no, false);
 
-
-      sac_ia_fpfh.setInputSource(source_temp);
-      sac_ia_fpfh.setSourceFeatures(fpfh_source);
-      sac_ia_fpfh.setInputTarget(target_temp);
-      sac_ia_fpfh.setTargetFeatures(fpfh_target);
-      cout<<"The source size source temp is "<<source_temp->points.size()<<endl;
-      cout<<"The fpfh_source size is  "<<fpfh_source->points.size()<<endl;
-      cout<<"The target size target temp is "<<target_temp->points.size()<<endl;
-      cout<<"The fpfh_target size is  "<<fpfh_target->points.size()<<endl;
+      sac_trans = CalSACia(fpfh_source, fpfh_target, source_temp, target_temp, fpfh_target->points[0]);
 
 
-      pcl::console::TicToc timer_align;
-      timer_align.tic();
+      // icp
+      icp_trans = do_icp(cloud_source, cloud_target, sac_trans);
+      pcl::console::TicToc timer_icp;
+      timer_icp.tic();
+      icp.setInputSource(cloud_source);
+      icp.setInputTarget(cloud_target);
+      icp.setMaximumIterations(max_iteration);
+      icp.setMaxCorrespondenceDistance(max_corresDist);
+      icp.setEuclideanFitnessEpsilon(EucFitnessEps);
+      icp.setTransformationEpsilon(TransEps);
+      icp.align(*icp_result, sac_trans);
+      cout <<"----------------------\nFor "<<method<<"\nICP:";
+      cout <<"has converged: "<< icp.hasConverged() <<",score: "<<icp.getFitnessScore()<< endl;
+      cout << icp.getConvergeCriteria()<<endl;
+      
+      cout<<"ICP Tranformation is\n "<<icp.getFinalTransformation()<<endl;
+      double icp_times_up = timer_icp.toc()/1000.0;
+      icp_time = ConvertToString(icp_times_up);
+      icp_score = ConvertToString(icp.getFitnessScore());
+      cout <<"Need "<<icp_times_up<<" secs.\n";
+      cout<< "The final size: "<<icp_result->points.size()<<endl;
 
-      sac_ia_fpfh.setNumberOfSamples(3);
-      sac_ia_fpfh.setCorrespondenceRandomness(6);//设置计算协方差时选择多少近邻点，该值越大，协防差越精确，但是计算效率越低.(可省)
-      //sac_ia.setMaximumIterations(100);
-      sac_ia_fpfh.setEuclideanFitnessEpsilon(0.001);
-      sac_ia_fpfh.setTransformationEpsilon(1e-10);
-      sac_ia_fpfh.setRANSACIterations(30);
-      sac_ia_fpfh.align(*final);
-      cout <<"has converged: "<< sac_ia_fpfh.hasConverged() <<",score: "<<sac_ia_fpfh.getFitnessScore()<< endl;
-      cout<<"Tranformation is\n "<<sac_ia_fpfh.getFinalTransformation()<<endl;
-      sac_time = ConvertToString(timer_align.toc()/1000);
-      sac_score = ConvertToString(sac_ia_fpfh.getFitnessScore());
-      cout <<"Need "<<timer_align.toc()/1000<<" secs.\n";
-      cout<< "The final size: "<<final->points.size()<<endl;
+      icp_trans = icp.getFinalTransformation();
 
-      sac_trans = sac_ia_fpfh.getFinalTransformation();
+      //ndt
+      pcl::console::TicToc ndt_timer;
+      ndt_timer.tic();
+      ndt.setTransformationEpsilon(0.01);
+      ndt.setStepSize(0.1);
+      ndt.setResolution(1.0);
+      ndt.setMaximumIterations(35);
+      ndt.setInputCloud(cloud_source);
+      ndt.setInputTarget(cloud_target);
+      ndt.align(*ndt_result, sac_trans);
+
+      cout<<"NDT Transformation is\n "<<ndt.getFinalTransformation()<<endl;
+      double ndt_times_up = ndt_timer.toc()/1000.0;
+      std::cout << "Normal Distributions Transform has converged:" << ndt.hasConverged()
+        << " score: " << ndt.getFitnessScore() << std::endl;
+      ndt_time = ConvertToString(ndt_times_up);
+      ndt_score = ConvertToString(ndt.getFitnessScore());
+      cout<<"NDT needs " + ndt_time +" secs"<<endl;
+      
+
+      ndt_trans = ndt.getFinalTransformation(); 
+      
+    }
+    else if (!(method.compare("shot"))){
+      pcl::PointCloud<pcl::SHOT352>::Ptr shot_source (new pcl::PointCloud<pcl::SHOT352>);
+      pcl::PointCloud<pcl::SHOT352>::Ptr shot_target (new pcl::PointCloud<pcl::SHOT352>);
+      shot_source = Compute_SHOT(cloud_source,source_temp, k_search_no, true);
+      shot_target = Compute_SHOT(cloud_target,target_temp, k_search_no, false);
+      
+      sac_trans = CalSACia(shot_source, shot_target, source_temp, target_temp, shot_target->points[0]);
+
       
 
 
@@ -646,65 +728,18 @@ int main(int argc, char** argv)
       icp.setInputSource(cloud_source);
       // icp.setInputSource(source_temp);
       icp.setInputTarget(cloud_target);
-      icp.setMaximumIterations(50);
+      icp.setMaximumIterations(100);
       icp.setMaxCorrespondenceDistance(0.4);//0.04 seems to in local optimal, converge to initial sac result (4 cm tight threshold) 
-      icp.setEuclideanFitnessEpsilon(0.2);
+      icp.setEuclideanFitnessEpsilon(0.05);//0.2
       icp.setTransformationEpsilon(1e-10);
       icp.align(*icp_result, sac_trans);
       cout <<"----------------------\nFor "<<method<<"\nICP:";
       cout <<"has converged: "<< icp.hasConverged() <<",score: "<<icp.getFitnessScore()<< endl;
       cout<<"ICP Tranformation is\n "<<icp.getFinalTransformation()<<endl;
-      icp_time = ConvertToString(timer_icp.toc()/1000);
+      double icp_times_up = timer_icp.toc()/1000.0;
+      icp_time = ConvertToString(icp_times_up);
       icp_score = ConvertToString(icp.getFitnessScore());
-      cout <<"Need "<<timer_icp.toc()/1000<<" secs.\n";
-      cout<< "The final size: "<<icp_result->points.size()<<endl;
-
-      icp_trans = icp.getFinalTransformation();
-    }
-    else if (!(method.compare("shot"))){
-      shot_source = Compute_SHOT(cloud_source,source_temp, k_search_no, true);
-      shot_target = Compute_SHOT(cloud_target,target_temp, k_search_no, false);
-
-      sac_ia_shot.setInputSource(source_temp);
-      sac_ia_shot.setSourceFeatures(shot_source);
-      sac_ia_shot.setInputTarget(target_temp);
-      sac_ia_shot.setTargetFeatures(shot_target);
-
-      pcl::console::TicToc timer_align;
-      timer_align.tic();
-      sac_ia_shot.setNumberOfSamples(3);
-      sac_ia_shot.setCorrespondenceRandomness(6);//设置计算协方差时选择多少近邻点，该值越大，协防差越精确，但是计算效率越低.(可省)
-      //sac_ia.setMaximumIterations(100);
-      sac_ia_shot.setEuclideanFitnessEpsilon(0.001);
-      sac_ia_shot.setTransformationEpsilon(1e-10);
-      sac_ia_shot.setRANSACIterations(30); 
-      sac_ia_shot.align(*final); //source cloud(keypoint source) aligned to target
-      cout <<"has converged: "<< sac_ia_shot.hasConverged() <<",score: "<<sac_ia_shot.getFitnessScore()<< endl;
-      cout<<"Tranformation is\n "<<sac_ia_shot.getFinalTransformation()<<endl;
-      sac_time = ConvertToString(timer_align.toc()/1000);
-      sac_score = ConvertToString(sac_ia_shot.getFitnessScore());
-      cout <<"Need "<<timer_align.toc()/1000<<" secs.\n";
-      cout<< "The final size: "<<final->points.size()<<endl;
-      sac_trans = sac_ia_shot.getFinalTransformation();
-
-
-      // icp
-      pcl::console::TicToc timer_icp;
-      timer_icp.tic();
-      icp.setInputSource(cloud_source);
-      // icp.setInputSource(source_temp);
-      icp.setInputTarget(cloud_target);
-      icp.setMaximumIterations(50);
-      icp.setMaxCorrespondenceDistance(0.4);//0.04 seems to in local optimal, converge to initial sac result (4 cm tight threshold) 
-      icp.setEuclideanFitnessEpsilon(0.2);
-      icp.setTransformationEpsilon(1e-10);
-      icp.align(*icp_result, sac_trans);
-      cout <<"----------------------\nFor "<<method<<"\nICP:";
-      cout <<"has converged: "<< icp.hasConverged() <<",score: "<<icp.getFitnessScore()<< endl;
-      cout<<"ICP Tranformation is\n "<<icp.getFinalTransformation()<<endl;
-      icp_time = ConvertToString(timer_icp.toc()/1000);
-      icp_score = ConvertToString(icp.getFitnessScore());
-      cout <<"Need "<<timer_icp.toc()/1000<<" secs.\n";
+      cout <<"Need "<<icp_times_up<<" secs.\n";
       cout<< "The final size: "<<icp_result->points.size()<<endl;
 
       icp_trans = icp.getFinalTransformation();
@@ -716,8 +751,15 @@ int main(int argc, char** argv)
 
     pcl::PointCloud<pcl::PointXYZ>::Ptr transformed_cloud (new pcl::PointCloud<pcl::PointXYZ>);
     pcl::PointCloud<pcl::PointXYZ>::Ptr transformed_sac (new pcl::PointCloud<pcl::PointXYZ>);
+    pcl::PointCloud<pcl::PointXYZ>::Ptr transformed_icp_key (new pcl::PointCloud<pcl::PointXYZ>);
+    pcl::PointCloud<pcl::PointXYZ>::Ptr transformed_sac_key (new pcl::PointCloud<pcl::PointXYZ>);
+    pcl::PointCloud<pcl::PointXYZ>::Ptr transformed_ndt (new pcl::PointCloud<pcl::PointXYZ>);
     pcl::transformPointCloud (*cloud_source, *transformed_sac, sac_trans);
     pcl::transformPointCloud (*cloud_source, *transformed_cloud, icp_trans);
+    pcl::transformPointCloud (*source_temp, *transformed_icp_key, icp_trans);
+    pcl::transformPointCloud (*source_temp, *transformed_sac_key, sac_trans);
+    pcl::transformPointCloud (*cloud_source, *transformed_ndt, ndt_trans);
+  
     
     
 
@@ -735,42 +777,64 @@ int main(int argc, char** argv)
 	boost::shared_ptr<pcl::visualization::PCLVisualizer> view(new pcl::visualization::PCLVisualizer(win_name));
 	int v1 = 0;
 	int v2 = 1;
-	view->createViewPort(0, 0, 0.5, 1, v1);
-  // view->createViewPort(0, 0, 1, 1, v1);
-	view->createViewPort(0.5, 0, 1, 1, v2);
-	view->setBackgroundColor(0, 0, 0, v1);
+	// view->createViewPort(0, 0, 0.5, 1, v1);
+	// view->createViewPort(0.5, 0, 1, 1, v2);
+  view->createViewPort(0, 0, 1, 1, v2);
+	// view->setBackgroundColor(0, 0, 0, v1);
 	view->setBackgroundColor(0.05, 0, 0, v2);
 
 	pcl::visualization::PointCloudColorHandlerCustom<pcl::PointXYZ> source_cloud_color(cloud_source, 255, 0, 0);
-	view->addPointCloud(cloud_source, source_cloud_color, "sources_cloud_v1", v1);
+	// view->addPointCloud(cloud_source, source_cloud_color, "sources_cloud_v1", v1);
 	pcl::visualization::PointCloudColorHandlerCustom<pcl::PointXYZ> target_cloud_color(cloud_target, 255, 255, 255);
-	view->addPointCloud(cloud_target, target_cloud_color, "target_cloud_v1", v1);
+	// view->addPointCloud(cloud_target, target_cloud_color, "target_cloud_v1", v1);
   pcl::visualization::PointCloudColorHandlerCustom<pcl::PointXYZ> target_temp_color(target_temp, 0, 255, 0);
-	view->addPointCloud(target_temp, target_temp_color, "target_temp_v1", v1);
+	// view->addPointCloud(target_temp, target_temp_color, "target_temp_v1", v1);
   pcl::visualization::PointCloudColorHandlerCustom<pcl::PointXYZ> source_temp_color(source_temp, 255, 255, 0);
-  view->addPointCloud(source_temp, source_temp_color, "source_temp_v1", v1);
-	view->setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 2, "sources_cloud_v1", v1);
-  view->setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 1, "target_cloud_v1", v1);
-  view->setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 6, "target_temp_v1", v1);
-  view->setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 6, "source_temp_v1", v1);
+  // view->addPointCloud(source_temp, source_temp_color, "source_temp_v1", v1);
+	// view->setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 2, "sources_cloud_v1", v1);
+  // view->setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 1, "target_cloud_v1", v1);
+  // view->setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 6, "target_temp_v1", v1);
+  // view->setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 6, "source_temp_v1", v1);
 
 	// final 為 source 的 keypoint 不是原完整點雲
 	// pcl::visualization::PointCloudColorHandlerCustom<pcl::PointXYZ> aligend_cloud_color(final, 255, 0, 0);
 	// view->addPointCloud(final, aligend_cloud_color, "aligend_cloud_v2", v2);
   pcl::visualization::PointCloudColorHandlerCustom<pcl::PointXYZ> aligend_cloud_color(transformed_cloud, 255, 0, 0);
-	view->addPointCloud(transformed_cloud, aligend_cloud_color, "aligend_cloud_v2", v2);
+	view->addPointCloud(transformed_cloud, aligend_cloud_color, "icp_aligend_cloud_v2", v2);
   pcl::visualization::PointCloudColorHandlerCustom<pcl::PointXYZ> sac_aligend_cloud_color(transformed_sac, 255, 255, 0);
 	view->addPointCloud(transformed_sac, sac_aligend_cloud_color, "sac_aligend_cloud_v2", v2);
+  pcl::visualization::PointCloudColorHandlerCustom<pcl::PointXYZ> ndt_aligend_cloud_color(transformed_ndt, 0, 0, 255);
 	view->addPointCloud(cloud_target, target_cloud_color, "target_cloud_v2", v2);
-	view->setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 2, "aligend_cloud_v2");
+  view->addPointCloud(transformed_ndt, ndt_aligend_cloud_color, "ndt_aligend_cloud_v2", v2);
+	view->setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 2, "icp_aligend_cloud_v2");
 	view->setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 1, "target_cloud_v2");
   view->setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 2, "sac_aligend_cloud_v2");
+  view->setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 2, "ndt_aligend_cloud_v2");
 
-  view->addText("Descriptor: "+method, 10, 35, "descriptor", v2);
-  view->addText("SAC time: "+sac_time+" ,score: "+sac_score, 10, 20, "sac_time", v2);
-  view->addText("ICP time: "+icp_time+" ,score: "+icp_score, 10, 5, "icp_time", v2);
+  view->addPointCloud(target_temp, target_temp_color, "target_temp_v2", v2);
+  view->addPointCloud(transformed_icp_key, source_temp_color, "source_temp_v2", v2);
+  view->setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 6, "target_temp_v2", v2);
+  view->setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 6, "source_temp_v2", v2);
 
-	//对应关系可视化
+
+  view->addText("Descriptor: "+method, 10, 50, "descriptor", v2);
+  view->addText("SAC time: "+sac_time+" ,score: "+sac_score, 10, 35, "sac_time", v2);
+  view->addText("ICP time: "+icp_time+" ,score: "+icp_score, 10, 20, "icp_time", v2);
+  view->addText("NDT time: "+ndt_time+" ,score: "+ndt_score, 10, 5, "ndt_time", v2);
+  view->addText("ICP setting :\n\nMaxIter: "+ConvertToString(max_iteration) + \
+              "\n\nMax_corresDist: "+ConvertToString(max_corresDist)+ \
+              "\n\nEucFitnessEps: "+ConvertToString(EucFitnessEps)+ \
+              "\n\nTransEps: "+ConvertToString(TransEps), 10, 425,"Icp setting", v2);
+  
+
+	//对应关系可视化 Get correspondence
+  // if ( !(method.compare("pfh")) ){
+  //   Cal_correspondence(method, pfh_source, pfh_source);
+  // }
+  // else if( !(method.compare("pfh")) ){
+  //   Cal_correspondence(method, pfh_source, pfh_source);
+  // }
+  
   if ( !(method.compare("pfh")) ){
     pcl::registration::CorrespondenceEstimation<pcl::PFHSignature125, pcl::PFHSignature125> crude_cor_est;
     boost::shared_ptr<pcl::Correspondences> cru_correspondences(new pcl::Correspondences);
