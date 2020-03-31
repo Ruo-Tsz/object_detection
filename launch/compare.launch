@@ -1,14 +1,14 @@
 <launch>
     <node pkg ="object_detection"	type = "test_sift"	name = "Sift"	ns = "whole"	output="screen">
-	<param name ="model"	type="string"	value="whole_r8.pcd"/>
-	<param name ="method"	type="string"	value="pfh"/>
+	<param name ="model"	type="string"	value="right_front_3.5m_r8.pcd"/>
+	<param name ="method"	type="string"	value="fpfh"/>
 	<param name ="scene"	type="string"	value="rm_g_extracted_radius_2.pcd"/>
     </node>
     
     <node pkg ="object_detection"	type = "test_sift"	name = "Sift"	ns = "partial"	output="screen">
 	<param name ="model"	type="string"	value="right_front_3.5m_r8.pcd"/>
-	<param name ="method"	type="string"	value="shot"/>
-	<param name ="scene"	type="string"	value="rm_g_extracted_radius_2.pcd"/>
+	<param name ="method"	type="string"	value="fpfh"/>
+	<param name ="scene"	type="string"	value="PC_315966449519192000.pcd"/>
     </node>
 
 <!--
