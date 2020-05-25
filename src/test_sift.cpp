@@ -1,6 +1,7 @@
 // STL
 #include <iostream>
 #include <ros/ros.h>
+#include <ros/package.h>
 
 // PCL
 #include <pcl/console/parse.h>
@@ -31,6 +32,7 @@
 #include <string>
 #include <signal.h>
 #include <cmath>
+#include <unistd.h>
 
 #include <pcl/registration/ia_ransac.h>
 #include <pcl/registration/icp.h>
@@ -59,7 +61,6 @@ namespace pcl
     };
 }
 using namespace std;
-std::string single;
 
 ros::Publisher pub, raw_pub, pfh_pub, pub_2, pub_transformed;
 ros::Subscriber sub;
@@ -75,8 +76,8 @@ float min_contrast = 0.01f; //I see some paper use 0.5 as threshold
 string icp_time, sac_time, sac_score, icp_score, ndt_time, ndt_score;
 
 ofstream outputFile;
-string filename_dir = "/home/d300/catkin_carol/src/object_detection/output";
 string method;
+bool output;
 
 //icp
 int max_iteration = 50;
@@ -205,6 +206,40 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr filter_ground(pcl::PointCloud<pcl::PointXYZ>
 }
 
 
+template<typename T>
+void OutputDescriptor(T descriptor, float search_radius, std::string type, std::string model){
+  std::string RADIUS = ConvertToString(search_radius);
+
+  std::string pkg_path = ros::package::getPath("object_detection");
+  std::string output_path = pkg_path + "/output/";
+  string filename;
+  int dim; 
+  
+  if (!(type.compare("fpfh")))
+  {
+    dim = 33;
+    filename = output_path + model + "_FPFH_r=" + RADIUS + ".csv";
+  }
+  else if (!(type.compare("pfh")))
+  {
+    dim = 125;
+    filename = output_path + model + "_PFH_r=" + RADIUS + ".csv";
+  }
+  // strcpy(f_s, filename.c_str());  
+  ROS_INFO("Outputing to %s ...",model.c_str());
+  outputFile.clear();
+  outputFile.open(filename);
+  for (int k=0; k<descriptor->points.size(); k++){
+    outputFile << descriptor->points[k].histogram[0] ;
+    for(int j=1; j<dim; j++){
+      outputFile << "," << descriptor->points[k].histogram[j] ;
+    }
+    outputFile << endl;
+  }
+
+  ROS_INFO("Done recording frame.");
+  outputFile.close();
+}
 
 
 pcl::PointCloud<pcl::PointXYZ>::Ptr crop(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_clusters){
@@ -222,7 +257,7 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr crop(pcl::PointCloud<pcl::PointXYZ>::Ptr clo
   return cluster_box;
 }
 
-pcl::PointCloud<pcl::FPFHSignature33>::Ptr Compute_FPFH(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_raw, pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_in, int k_search, bool output){
+pcl::PointCloud<pcl::FPFHSignature33>::Ptr Compute_FPFH(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_raw, pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_in, float radius, bool output, string model){
     // Object for storing the normals.
     pcl::PointCloud<pcl::Normal>::Ptr normals(new pcl::PointCloud<pcl::Normal>);
     pcl::PointCloud<pcl::FPFHSignature33>::Ptr fpfhs_src(new pcl::PointCloud<pcl::FPFHSignature33>());
@@ -231,7 +266,7 @@ pcl::PointCloud<pcl::FPFHSignature33>::Ptr Compute_FPFH(pcl::PointCloud<pcl::Poi
     pcl::NormalEstimation<pcl::PointXYZ, pcl::Normal> normalEstimation;
     normalEstimation.setInputCloud(cloud_raw);
     // 若用半徑,則要夠大 (dataset_dependent),否則可能出現normal nan  導致後面算不出來
-    normalEstimation.setRadiusSearch(0.3); //original 0.03 = 3cm too small to evaluate local normal
+    normalEstimation.setRadiusSearch(radius); //original 0.03 = 3cm too small to evaluate local normal
     // normalEstimation.setKSearch(k_search);
     pcl::search::KdTree<pcl::PointXYZ>::Ptr kdtree(new pcl::search::KdTree<pcl::PointXYZ>);
     normalEstimation.setSearchMethod(kdtree);
@@ -262,7 +297,7 @@ pcl::PointCloud<pcl::FPFHSignature33>::Ptr Compute_FPFH(pcl::PointCloud<pcl::Poi
 
     fpfh.setInputCloud(cloud_in);
     fpfh.setSearchSurface(cloud_raw);
-    fpfh.setRadiusSearch(0.3);
+    fpfh.setRadiusSearch(radius);
     // fpfh.setKSearch(k_search);
     fpfh.setInputNormals(normals);
     fpfh.setSearchMethod(kdtree);
@@ -277,9 +312,12 @@ pcl::PointCloud<pcl::FPFHSignature33>::Ptr Compute_FPFH(pcl::PointCloud<pcl::Poi
 
     // output descriptor
     if (output){
-      stringstream kk;
-      kk << k_search;
-      string filename = filename_dir + "/FPFH_k=" + kk.str() + ".csv";
+      OutputDescriptor(fpfhs_src, radius, "fpfh", model);
+      /*
+      std::string RADIUS = ConvertToString(radius);
+      char filename_dir[80];
+      getcwd(filename_dir, sizeof(filename_dir));
+      string filename = filename_dir + "/output/FPFH_r=" + RADIUS + ".csv";
       outputFile.open(filename);
       for (int k=0; k<fpfhs_src->points.size(); k++){
         // outputFile << cloud_raw->header.stamp ;
@@ -290,6 +328,7 @@ pcl::PointCloud<pcl::FPFHSignature33>::Ptr Compute_FPFH(pcl::PointCloud<pcl::Poi
         outputFile << endl;
       }
       cout << "Done recording frame " << cloud_raw->header.stamp << endl;
+      */
     }
 
     pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_out (new pcl::PointCloud<pcl::PointXYZ>);
@@ -299,7 +338,7 @@ pcl::PointCloud<pcl::FPFHSignature33>::Ptr Compute_FPFH(pcl::PointCloud<pcl::Poi
 
 
 
-pcl::PointCloud<pcl::PFHSignature125>::Ptr Compute_PFH(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_raw, pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_in, int k_search, bool output){
+pcl::PointCloud<pcl::PFHSignature125>::Ptr Compute_PFH(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_raw, pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_in, float radius, bool output, std::string model){
     // Object for storing the normals.
     pcl::PointCloud<pcl::Normal>::Ptr normals(new pcl::PointCloud<pcl::Normal>);
     // Object for storing the PFH descriptors for each point.
@@ -309,8 +348,8 @@ pcl::PointCloud<pcl::PFHSignature125>::Ptr Compute_PFH(pcl::PointCloud<pcl::Poin
     pcl::NormalEstimation<pcl::PointXYZ, pcl::Normal> normalEstimation;
     normalEstimation.setInputCloud(cloud_raw);
     // 若用半徑,則要夠大 (dataset_dependent),否則可能出現normal nan  導致後面算不出來
-    // normalEstimation.setRadiusSearch(0.03);
-    normalEstimation.setKSearch(k_search);
+    normalEstimation.setRadiusSearch(radius);
+    // normalEstimation.setKSearch(k_search);
     pcl::search::KdTree<pcl::PointXYZ>::Ptr kdtree(new pcl::search::KdTree<pcl::PointXYZ>);
     normalEstimation.setSearchMethod(kdtree);
     normalEstimation.compute(*normals);
@@ -334,7 +373,8 @@ pcl::PointCloud<pcl::PFHSignature125>::Ptr Compute_PFH(pcl::PointCloud<pcl::Poin
     pfh.setInputCloud(cloud_in);
     // Use whole raw data to construct geometrical feature model(including non-keypoint)
     pfh.setSearchSurface(cloud_raw);
-    pfh.setKSearch(k_search);
+    // pfh.setKSearch(k_search);
+    pfh.setRadiusSearch(radius);
     pfh.setInputNormals(normals);
     pfh.setSearchMethod(kdtree);
     // Search radius, to look for neighbors. Note: the value given here has to be
@@ -351,19 +391,7 @@ pcl::PointCloud<pcl::PFHSignature125>::Ptr Compute_PFH(pcl::PointCloud<pcl::Poin
 
     // output descriptor
     if (output){
-      stringstream kk;
-      kk << k_search;
-      string filename = filename_dir + "/PFH_k=" + kk.str() + ".csv";
-      outputFile.open(filename);
-      for (int k=0; k<descriptors->points.size(); k++){
-        // outputFile << cloud_raw->header.stamp ;
-        outputFile <<  descriptors->points[k].histogram[0] ;
-        for(int j=1; j<125; j++){
-          outputFile << "," << descriptors->points[k].histogram[j] ;
-        }
-        outputFile << endl;
-      }
-      cout << "Done recording frame " << cloud_raw->header.stamp << endl;
+      OutputDescriptor(descriptors, radius, "pfh", model);
     }
 
     pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_out (new pcl::PointCloud<pcl::PointXYZ>);
@@ -372,6 +400,7 @@ pcl::PointCloud<pcl::PFHSignature125>::Ptr Compute_PFH(pcl::PointCloud<pcl::Poin
 
 }
 
+/*
 pcl::PointCloud<pcl::SHOT352>::Ptr Compute_SHOT(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_raw, pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_in, int k_search, bool output){
    // Object for storing the normals.
     pcl::PointCloud<pcl::Normal>::Ptr normals(new pcl::PointCloud<pcl::Normal>);
@@ -437,6 +466,7 @@ pcl::PointCloud<pcl::SHOT352>::Ptr Compute_SHOT(pcl::PointCloud<pcl::PointXYZ>::
     pcl::copyPointCloud(*shot_src, *cloud_out);
     return shot_src;
 }
+*/
 
 pcl::PointCloud<pcl::PointWithScale> do_sift(pcl::PointCloud<pcl::PointXYZ>::Ptr cloud, float min_scale, int n_octaves, int n_scales_per_octave, float min_contrast){
     pcl::console::TicToc time;
@@ -483,6 +513,7 @@ Eigen::Matrix4f do_icp (pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_source, pcl::P
   return icp_trans;
 }
 
+/*
 void callback(const sensor_msgs::PointCloud2 &msg){
     cout << "Get new at " << msg.header.stamp << std::endl;
     std::cout << "Original points: " << msg.width*msg.height <<std::endl;
@@ -531,6 +562,7 @@ void callback(const sensor_msgs::PointCloud2 &msg){
 
 
 }
+*/
 
 
 void MySigintHandler(int sig)
@@ -552,24 +584,28 @@ int main(int argc, char** argv)
     pub_2 = nh.advertise<sensor_msgs::PointCloud2>("sift_compare", 1000);
     pub_transformed = nh.advertise<sensor_msgs::PointCloud2>("transformed", 1000);
     
-    sub = nh.subscribe("/scan",1,&callback);
+    // sub = nh.subscribe("/scan",1,&callback);
 
     signal(SIGINT, MySigintHandler);
 
     // string k_search;
+    // descriptor type : fpfh/pfh/shot
     nh.getParam("method", method);
+    nh.param<bool>("output", output, false);
     // nh.getParam("k",k_search);
     // cout << k_search << endl;
     // int k_search_no = std::strtol(k_search.c_str(),nullptr,10);
-    int k_search_no = 20;
+    // int k_search_no = 20;
+    float radius = 0.3;
+
+    std::string pkg_path = ros::package::getPath("object_detection");
+    std::string output_path = pkg_path + "/output/";
 
 
   //////////////////////////////single frame
-    // std::string ply_file = "/home/d300/catkin_carol/lidar_frame/PC_315966449519192000.ply";
-    std::string scene_path = "/home/d300/catkin_carol/src/object_detection/segmented_car_from_scene/";
-    // std::string scene_file = "/home/d300/catkin_carol/src/object_detection/model/3D_Models/Audi_R8/scan/whole_r8.pcd";
+    std::string scene_path = pkg_path + "/segmented_car_from_scene/";
     // std::string pcd_path = "/home/d300/catkin_carol/src/object_detection/model/3D_Models/audi_a3/scan/";
-    std::string model_path = "/home/d300/catkin_carol/src/object_detection/model/3D_Models/Audi_R8/scan/temp/";
+    std::string model_path = pkg_path + "/model/3D_Models/Audi_R8/scan/temp/";
     // std::string model_file = pcd_path + argv[1];
     std::string model_file, model, scene_file, scene;
     nh.getParam("model",model);
@@ -578,7 +614,6 @@ int main(int argc, char** argv)
     scene_file = scene_path + scene;
 
     
-    // std::cout << "Reading " << ply_file << std::endl;
     std::cout << "Reading " << scene_file << std::endl;
     std::cout << "Reading " << model_file << std::endl;
     pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_source (new pcl::PointCloud<pcl::PointXYZ>);
@@ -611,7 +646,7 @@ int main(int argc, char** argv)
     pcl::console::parse(argc, argv, "-n_octaves", n_octaves_2);
     pcl::console::parse(argc, argv, "-n_scales_per_octave", n_scales_per_octave_2);
     pcl::console::parse(argc, argv, "-min_contrast", min_contrast_2);
-    pcl::console::parse(argc, argv, "-k", k_search_no);
+    // pcl::console::parse(argc, argv, "-k", k_search_no);
 
     std::cout<<"-----------------------------------------\n";
     std::cout<<"min_scale: " << min_scale << std::endl;
@@ -643,8 +678,8 @@ int main(int argc, char** argv)
     if ( !(method.compare("pfh")) ){
       pcl::PointCloud<pcl::PFHSignature125>::Ptr pfh_source (new pcl::PointCloud<pcl::PFHSignature125>);
       pcl::PointCloud<pcl::PFHSignature125>::Ptr pfh_target (new pcl::PointCloud<pcl::PFHSignature125>);
-      pfh_source = Compute_PFH(cloud_source,source_temp, k_search_no, false);
-      pfh_target = Compute_PFH(cloud_target,target_temp, k_search_no, false);
+      pfh_source = Compute_PFH(cloud_source,source_temp, radius, output, scene.substr(0, scene.length() - 4) );
+      pfh_target = Compute_PFH(cloud_target,target_temp, radius, output, model.substr(0, model.length() - 4) );
 
       sac_trans = CalSACia(pfh_source, pfh_target, source_temp, target_temp, pfh_target->points[0]);
       /*
@@ -680,11 +715,10 @@ int main(int argc, char** argv)
     else if( !(method.compare("fpfh")) ){
       pcl::PointCloud<pcl::FPFHSignature33>::Ptr fpfh_source (new pcl::PointCloud<pcl::FPFHSignature33>);
       pcl::PointCloud<pcl::FPFHSignature33>::Ptr fpfh_target (new pcl::PointCloud<pcl::FPFHSignature33>);
-      fpfh_source = Compute_FPFH(cloud_source,source_temp, k_search_no, true);
-      fpfh_target = Compute_FPFH(cloud_target,target_temp, k_search_no, false);
+      fpfh_source = Compute_FPFH(cloud_source,source_temp, radius, output, scene.substr(0, scene.length() - 4) );
+      fpfh_target = Compute_FPFH(cloud_target,target_temp, radius, output, model.substr(0, model.length() - 4) );
 
       sac_trans = CalSACia(fpfh_source, fpfh_target, source_temp, target_temp, fpfh_target->points[0]);
-      // icp
       icp_trans = do_icp(cloud_source, cloud_target, sac_trans);
       
       
