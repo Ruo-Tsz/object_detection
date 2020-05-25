@@ -1,0 +1,29 @@
+{
+    "configurations": [
+        {
+            "browse": {
+                "databaseFilename": "",
+                "limitSymbolsToIncludedHeaders": true
+            },
+            "includePath": [
+                "/home/ee904/work/devel/include/**",
+                "/opt/ros/kinetic/include/**",
+                "/home/ee904/work/src/argo/include/**",
+                "/home/ee904/work/src/itri/itri_tracking/ground_filter/include/**",
+                "/home/ee904/work/src/ground_truth/include/**",
+                "/home/ee904/work/src/itri/itri_tracking/lidar_imm_ukf_pda_track/include/**",
+                "/home/ee904/work/src/kitti_velodyne/include/**",
+                "/home/ee904/work/src/lidar_track/include/**",
+                "/home/ee904/work/src/new_lidar_track/include/**",
+                "/home/ee904/work/src/itri/itri_tracking/range_clustering/include/**",
+                "/usr/include/**"
+            ],
+            "name": "ROS",
+            "intelliSenseMode": "gcc-x64",
+            "compilerPath": "/usr/bin/gcc",
+            "cStandard": "c11",
+            "cppStandard": "c++17"
+        }
+    ],
+    "version": 4
+}
