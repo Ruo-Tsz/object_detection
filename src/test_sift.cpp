@@ -207,7 +207,7 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr filter_ground(pcl::PointCloud<pcl::PointXYZ>
 
 
 template<typename T>
-void OutputDescriptor(T descriptor, float search_radius, std::string type, std::string model){
+void OutputDescriptor(T descriptor, float search_radius, std::string type, std::string model, pcl::PointCloud<pcl::PointXYZ>::Ptr pos){
   std::string RADIUS = ConvertToString(search_radius);
 
   std::string pkg_path = ros::package::getPath("object_detection");
@@ -218,22 +218,31 @@ void OutputDescriptor(T descriptor, float search_radius, std::string type, std::
   if (!(type.compare("fpfh")))
   {
     dim = 33;
-    filename = output_path + model + "_FPFH_r=" + RADIUS + ".csv";
+    filename = output_path + model + "_FPFH_r=" + RADIUS + "_pos" + ".csv";
   }
   else if (!(type.compare("pfh")))
   {
     dim = 125;
-    filename = output_path + model + "_PFH_r=" + RADIUS + ".csv";
+    filename = output_path + model + "_PFH_r=" + RADIUS + "_pos" + ".csv";
   }
   // strcpy(f_s, filename.c_str());  
   ROS_INFO("Outputing to %s ...",model.c_str());
   outputFile.clear();
   outputFile.open(filename);
+
+  for (int d=0; d<dim; d++){
+    outputFile << d+1 << "," ;
+  }
+  outputFile << "x" << "," << "y" << "," << "z" << endl;
+
   for (int k=0; k<descriptor->points.size(); k++){
     outputFile << descriptor->points[k].histogram[0] ;
     for(int j=1; j<dim; j++){
       outputFile << "," << descriptor->points[k].histogram[j] ;
     }
+
+    // adding keypoint coordinate pos
+    outputFile << "," << pos->points[k].x << "," << pos->points[k].y << "," << pos->points[k].z;
     outputFile << endl;
   }
 
@@ -306,13 +315,14 @@ pcl::PointCloud<pcl::FPFHSignature33>::Ptr Compute_FPFH(pcl::PointCloud<pcl::Poi
     fpfh.compute(*fpfhs_src);
     std::cout<<"Computing the FPFH points takes "<<fpfh_time.toc()/1000<<"seconds"<<std::endl;
     std::cout << "The points # after FPFH: "<< fpfhs_src->points.size()<< std::endl;
+    std::cout<< "The points of sift " << cloud_in->points.size() << std::endl;
     // for (int i=0; i<33; i++)
     //   std::cout << fixed << setprecision(4) << fpfhs_src->points[4].histogram[i] << std::endl;
 
 
     // output descriptor
     if (output){
-      OutputDescriptor(fpfhs_src, radius, "fpfh", model);
+      OutputDescriptor(fpfhs_src, radius, "fpfh", model, cloud_in);
       /*
       std::string RADIUS = ConvertToString(radius);
       char filename_dir[80];
@@ -391,7 +401,7 @@ pcl::PointCloud<pcl::PFHSignature125>::Ptr Compute_PFH(pcl::PointCloud<pcl::Poin
 
     // output descriptor
     if (output){
-      OutputDescriptor(descriptors, radius, "pfh", model);
+      OutputDescriptor(descriptors, radius, "pfh", model, cloud_in);
     }
 
     pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_out (new pcl::PointCloud<pcl::PointXYZ>);
@@ -623,7 +633,7 @@ int main(int argc, char** argv)
       PCL_ERROR ("Couldn't read file ",model_file);
       return -1;
     }
-    if(pcl::io::loadPCDFile<pcl::PointXYZ> (scene_file, *cloud_source) == -1) // load the file
+    if(pcl::io::loadPLYFile<pcl::PointXYZ> (scene_file, *cloud_source) == -1) // load the file
     {
       PCL_ERROR ("Couldn't read file ",scene_file);
       return -1;
