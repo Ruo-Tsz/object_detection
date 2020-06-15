@@ -633,7 +633,7 @@ int main(int argc, char** argv)
       PCL_ERROR ("Couldn't read file ",model_file);
       return -1;
     }
-    if(pcl::io::loadPLYFile<pcl::PointXYZ> (scene_file, *cloud_source) == -1) // load the file
+    if(pcl::io::loadPCDFile<pcl::PointXYZ> (scene_file, *cloud_source) == -1) // load the file
     {
       PCL_ERROR ("Couldn't read file ",scene_file);
       return -1;

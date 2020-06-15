@@ -42,38 +42,73 @@
 
 #include <pcl/kdtree/kdtree_flann.h>
 #include <signal.h>
+using namespace std;
 
 ros::Publisher scene_pub, keyPt_pub;
 pcl::PointCloud<pcl::PointXYZI>::Ptr cloud_source (new pcl::PointCloud<pcl::PointXYZI>);
 pcl::PointCloud<pcl::PointXYZI>::Ptr cloud_keyPt (new pcl::PointCloud<pcl::PointXYZI>);
 std::ifstream inputFile;
 std::vector<int> labels;
-using namespace std;
+vector<pcl::PointXYZI> pts;
 
-pcl::PointCloud<pcl::PointXYZI>::Ptr read_keyPt(){
-    std::string keyPt_path = "/home/d300/catkin_carol/src/object_detection/output/FPFH_whole_scenes_cluster/cluster_pos.csv";
+void read_keyPt(){
+    std::string pkg_path = ros::package::getPath("object_detection");
+    std::string keyPt_path = pkg_path + "/output/FPFH_whole_scenes_cluster/cluster_pos.csv";
+    // std::string keyPt_path = pkg_path + "/output/cluster_pos_self.csv";
+    // std::string keyPt_path = "/home/d300/catkin_carol/src/object_detection/output/FPFH_whole_scenes_cluster/cluster_pos.csv";
     std::string line;
-    inputFile.open(keyPt_pub);
+    inputFile.open(keyPt_path);
     int counter = 0;
+    int pt_num = 0;
     bool get_pt = false; // get 3 coor for 1 pt
        
     while (getline( inputFile, line,'\n'))  //讀檔讀到跳行字元
-	{
-	  istringstream templine(line); // string 轉換成 stream
-	  string data;
-	  while (getline( templine, data,',')) //讀檔讀到逗號
-	  {
+    {
+      istringstream templine(line); // string 轉換成 stream
+      string data;
+      pcl::PointXYZI pt;
+      while (getline( templine, data,',')) //讀檔讀到逗號
+      {
           if (counter == 0){
             labels.push_back(atoi(data.c_str())); //string 轉換成數字
             counter++;
           }
           else if (counter == 1){
-            
+            pt.x = atof(data.c_str());
+            counter++;
           }  
-	  }
-	}
-  inputFile.close();
-    return 
+          else if (counter == 2)
+          {
+            pt.y = atof(data.c_str());
+            counter++;
+          }
+          else if (counter == 3)
+          {
+            pt.z = atof(data.c_str());
+            pts.push_back(pt);
+            counter = 0;
+            pt_num++;
+          }
+          // cout << data << endl;
+            
+      }
+      // cout << line << endl;
+    }
+    inputFile.close();
+}
+
+pcl::PointCloud<pcl::PointXYZI> construct_keyPt(){
+  pcl::PointCloud<pcl::PointXYZI> cloud;
+  
+  for(int idx = 0; idx<labels.size(); idx++){
+    pcl::PointXYZI pt;
+    pt = pts.at(idx);
+    pt.intensity = 100*labels.at(idx);
+
+    cloud.points.push_back(pt);
+  }
+
+  return cloud;
 }
 
 void signalHandler(int sig){
@@ -94,12 +129,33 @@ int main(int argc, char** argv){
 
     signal(SIGINT, signalHandler);
 
-    if(pcl::io::loadPCDFile<pcl::PointXYZ> (scene_path, *cloud_source) == -1){
+    if(pcl::io::loadPCDFile<pcl::PointXYZI> (scene_path, *cloud_source) == -1){
         PCL_ERROR ("Couldn't read file ",scene_path);
         return -1;
     }
 
-    cloud_keyPt = read_keyPt();
+    read_keyPt();
+    // cout << pts.size() << endl;
+    // cout << pts.at(100).x <<" "<< pts.at(100).y <<" "<< pts.at(100).z << endl;
+    // cout << labels.size() << endl;
+    // cout << labels.at(100) << endl;
+
+    *cloud_keyPt = construct_keyPt();
+    sensor_msgs::PointCloud2 keyPoint, original;
+    pcl::toROSMsg(*cloud_keyPt, keyPoint);
+    pcl::toROSMsg(*cloud_source, original);
+    keyPoint.header.frame_id = "scan";
+    original.header.frame_id = "scan";
+
+    ros::Rate r(10);
+    while (ros::ok())
+    {
+      scene_pub.publish(original);
+      keyPt_pub.publish(keyPoint);
+      r.sleep();
+    }
+    
+
 
     
 
