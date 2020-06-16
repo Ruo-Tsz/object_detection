@@ -111,6 +111,12 @@ add_executable(
    src/icp_matching.cpp
 )
 
+add_executable(
+   viz_cluster_fpfh
+   src/viz_cluster_fpfh.cpp
+)
+
+
 
 
 
@@ -167,6 +173,11 @@ target_link_libraries(
 
 target_link_libraries(
    icp_matching
+   ${catkin_LIBRARIES}
+)
+
+target_link_libraries(
+   viz_cluster_fpfh
    ${catkin_LIBRARIES}
 )
 
